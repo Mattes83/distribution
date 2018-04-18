@@ -1,4 +1,4 @@
-package middleware
+package torrent
 
 import (
 	"sync"
@@ -7,7 +7,10 @@ import (
 	"github.com/opencontainers/go-digest"
 )
 
-type Peer string
+type Peer struct {
+	ip string
+	id string
+}
 
 type PeerCache interface {
 	getPeers(dgst digest.Digest) ([]Peer, error)
@@ -23,13 +26,13 @@ func NewInMemPeerCache() *PeerCache {
 	return &memPeers{cache: make(map[digest.Digest][]Peer), mutex: sync.Mutex{}}
 }
 
-func (memPeers *p) getPeers(blob digest.Digest) ([]Peer, error) {
-	return p[blob]
+func (p *memPeers) getPeers(dgst digest.Digest) ([]Peer, error) {
+	return p[dgst]
 }
 
-func (memPeers *p) addPeer(blob digest.Digest, peer Peer, ttl time.Duration) error {
+func (p *memPeers) addPeer(dgst digest.Digest, peer Peer, ttl time.Duration) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	p.cache[digest] = append(p.cache[digest], peer)
+	p.cache[dgst] = append(p.cache[dgst], peer)
 	return nil
 }
