@@ -135,11 +135,11 @@ func NewRegistry(ctx context.Context, driver storagedriver.StorageDriver, option
 
 	registry := &registry{
 		blobStore: bs,
-		blobServer: &blobServer{
+		blobServer: NewTorrentBlobServer(&blobServer{
 			driver:  driver,
 			statter: statter,
 			pathFn:  bs.path,
-		},
+		}, bs),
 		statter:                statter,
 		resumableDigestEnabled: true,
 		driver:                 driver,
