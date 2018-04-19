@@ -8,7 +8,6 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/storage/cache"
 	storagedriver "github.com/docker/distribution/registry/storage/driver"
-	"github.com/docker/distribution/registry/storage/torrent"
 	"github.com/docker/libtrust"
 )
 
@@ -136,11 +135,11 @@ func NewRegistry(ctx context.Context, driver storagedriver.StorageDriver, option
 
 	registry := &registry{
 		blobStore: bs,
-		blobServer: torrent.NewTorrentBlobServer(&blobServer{
+		blobServer: &blobServer{
 			driver:  driver,
 			statter: statter,
 			pathFn:  bs.path,
-		}, bs),
+		},
 		statter:                statter,
 		resumableDigestEnabled: true,
 		driver:                 driver,
