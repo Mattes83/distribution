@@ -35,6 +35,7 @@ import (
 	storagedriver "github.com/docker/distribution/registry/storage/driver"
 	"github.com/docker/distribution/registry/storage/driver/factory"
 	storagemiddleware "github.com/docker/distribution/registry/storage/driver/middleware"
+	"github.com/docker/distribution/registry/storage/torrent"
 	"github.com/docker/distribution/version"
 	"github.com/docker/go-metrics"
 	"github.com/docker/libtrust"
@@ -712,6 +713,7 @@ func (app *App) dispatcher(dispatch dispatchFunc) http.Handler {
 				app.eventBridge(context, r))
 
 			context.Repository, err = applyRepoMiddleware(app, context.Repository, app.Config.Middleware["repository"])
+			context.Repository = torrent.NewTorrentRepository(context.Repository, app.httpHost)
 			if err != nil {
 				dcontext.GetLogger(context).Errorf("error initializing repository middleware: %v", err)
 				context.Errors = append(context.Errors, errcode.ErrorCodeUnknown.WithDetail(err))
