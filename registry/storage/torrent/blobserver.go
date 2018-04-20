@@ -5,11 +5,14 @@ package torrent
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/docker/distribution"
 	dcontext "github.com/docker/distribution/context"
@@ -100,21 +103,46 @@ func (t torrentBlobStore) ServeBlob(ctx context.Context, w http.ResponseWriter, 
 
 func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distribution.BlobStore, dgst digest.Digest) {
 	// TODO: check if torrent generation is already progress before continuing
+	logger := logrus.WithField("digest", dgst.String())
+	// get digest reader
 	r, err := bs.Open(ctx, dgst)
 	if err != nil {
-		logrus.WithError(err).Errorf("Couldn't get content of %v to generate torrent", dgst)
+		logger.WithError(err).Error("Couldn't get content to generate torrent")
 		return
 	}
 	defer r.Close()
-	m, err := metainfo.Load(r)
+	// write it to temp file
+	path := "/tmp/" + dgst.String()
+	f, err := os.Create(path)
 	if err != nil {
-		logrus.WithError(err).Errorf("Couldn't generate torrent of %v", dgst)
+		logger.WithError(err).Error("Couldn't create temp file")
 		return
 	}
-	// TODO: find registry host and http(s)
-	m.Announce = "http://registry/bittorrent/announce/" + dgst.String()
+	io.Copy(f, r)
+	f.Close()
+	s, _ := os.Stat(path)
+	logger.Infof("size is %d", s.Size())
+	// generate torrent from that file
+	mi := metainfo.MetaInfo{
+		Announce: "https://tracker.terriblecode.com/announce/",
+	}
+	mi.SetDefaults()
+	info := metainfo.Info{
+		Name:        dgst.String(),
+		PieceLength: 256 * 1024,
+	}
+	err = info.BuildFromFilePath(path)
+	if err != nil {
+		logger.WithError(err).Error("Couldn't generate from file")
+		return
+	}
+	mi.InfoBytes, err = bencode.Marshal(info)
+	if err != nil {
+		logger.WithError(err).Error("Couldn't marshal")
+		return
+	}
 	buff := bytes.NewBuffer(nil)
-	m.Write(buff)
+	mi.Write(buff)
 	// TODO: add mutex sync
 	torrents[dgst] = buff.Bytes()
 }
