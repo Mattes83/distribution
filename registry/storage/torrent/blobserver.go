@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/docker/distribution"
@@ -26,6 +27,7 @@ var (
 	peerCache = NewInMemPeerCache()
 	peerttl   = 4 * time.Hour
 	torrents  = make(TorrentStore)
+	client    *torrent.Client
 )
 
 // repository provides distribution.Repository impl with only Blobs function changed
@@ -93,30 +95,33 @@ func (t torrentBlobStore) ServeBlob(ctx context.Context, w http.ResponseWriter, 
 	torrent, ok := torrents[dgst]
 	if !ok {
 		// create torrent in background and serve the content for now
-		go createTorrentFile(ctx, torrents, t.BlobStore, dgst)
-		return t.BlobStore.ServeBlob(ctx, w, r, dgst)
+		err = createTorrentFile(ctx, torrents, t.BlobStore, dgst)
+		if err != nil {
+			return t.BlobStore.ServeBlob(ctx, w, r, dgst)
+		}
+		torrent = torrents[dgst]
 	}
 	w.Header().Set("Content-Type", "application/x-bittorrent")
 	w.Write(torrent)
 	return nil
 }
 
-func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distribution.BlobStore, dgst digest.Digest) {
+func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distribution.BlobStore, dgst digest.Digest) error {
 	// TODO: check if torrent generation is already progress before continuing
 	logger := logrus.WithField("digest", dgst.String())
 	// get digest reader
 	r, err := bs.Open(ctx, dgst)
 	if err != nil {
 		logger.WithError(err).Error("Couldn't get content to generate torrent")
-		return
+		return err
 	}
 	defer r.Close()
 	// write it to temp file
-	path := "/tmp/" + dgst.String()
+	path := "/tmp/" + dgst.String() + ".tar.gz"
 	f, err := os.Create(path)
 	if err != nil {
 		logger.WithError(err).Error("Couldn't create temp file")
-		return
+		return err
 	}
 	io.Copy(f, r)
 	f.Close()
@@ -124,7 +129,7 @@ func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distributi
 	logger.Infof("size is %d", s.Size())
 	// generate torrent from that file
 	mi := metainfo.MetaInfo{
-		Announce: "https://tracker.terriblecode.com/announce/",
+		Announce: "http://terriblecode.com:6969/announce",
 	}
 	mi.SetDefaults()
 	info := metainfo.Info{
@@ -134,15 +139,28 @@ func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distributi
 	err = info.BuildFromFilePath(path)
 	if err != nil {
 		logger.WithError(err).Error("Couldn't generate from file")
-		return
+		return err
 	}
 	mi.InfoBytes, err = bencode.Marshal(info)
 	if err != nil {
 		logger.WithError(err).Error("Couldn't marshal")
-		return
+		return err
 	}
 	buff := bytes.NewBuffer(nil)
 	mi.Write(buff)
 	// TODO: add mutex sync
 	torrents[dgst] = buff.Bytes()
+	client.AddTorrent(&mi)
+	return nil
+}
+
+func init() {
+	var err error
+	client, err = torrent.NewClient(&torrent.Config{DataDir: "/tmp", Seed: true})
+	if err != nil {
+		logrus.WithError(err).Error("Couldnt create client")
+	}
+	go func() {
+		client.WaitAll()
+	}()
 }
