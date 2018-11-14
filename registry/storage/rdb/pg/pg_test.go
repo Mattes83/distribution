@@ -210,5 +210,15 @@ func TestPutNewManifestOnRepo(t *testing.T) {
 	_, _ = testPutNewManifestOnRepo(t, pg)
 }
 
-func TestGetRepoManifest(t *testing.T) {
+func TestGetTagManifest(t *testing.T) {
+	t.Parallel()
+	pg := getPGDB(t)
+	manifest, repo := testPutNewManifestOnRepo(t, pg)
+	ctx := context.Background()
+	require.NoError(t, pg.LinkTag(ctx, repo.FullName, "latest", manifest.Digest))
+	gotManifest, err := pg.GetTagManifest(ctx, repo.FullName, "latest")
+	require.NoError(t, err)
+	require.EqualValues(t, manifest.Digest, gotManifest.Digest)
+	require.EqualValues(t, manifest.Size, gotManifest.Size)
+	require.EqualValues(t, manifest.Payload, gotManifest.Payload)
 }

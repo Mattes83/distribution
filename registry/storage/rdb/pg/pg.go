@@ -396,12 +396,12 @@ func (pg *pgDB) GetTagManifest(ctx context.Context, repo string, tag string) (*r
 		FROM 
 			blobs b 
 			JOIN tags t ON t.manifest = b.digest 
-			JOIN repos r ON r.id = rb.repo_id
+			JOIN repos r ON r.id = t.repo_id
 	  WHERE 
 	    r.full_name = ? 
 	    AND t.tag = ?`
 	var manifest rdb.Manifest
-	err := sess.SelectBySql(query, repo, tag).LoadOneContext(ctx, &manifest.Blob)
+	err := sess.SelectBySql(query, repo, tag).LoadOneContext(ctx, &manifest)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting repo manifest")
 	}
