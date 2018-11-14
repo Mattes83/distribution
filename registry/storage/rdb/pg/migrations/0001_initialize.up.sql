@@ -7,6 +7,8 @@ CREATE TABLE blobs(
 	last_referred timestamp without time zone NOT NULL,
 	-- digests of blobs that this blob refers to
 	refers text[] DEFAULT '{}'
+	-- used to store manifest payload only
+	payload bytea
 );
 
 CREATE TABLE repos(

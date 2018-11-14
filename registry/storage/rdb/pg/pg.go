@@ -19,9 +19,10 @@ import (
 // Postgres implementation of RepoMetadataDB
 
 type pgDB struct {
-	conn     *dbr.Connection
-	dsn      string
-	waitRepo chan bool
+	conn         *dbr.Connection
+	dsn          string
+	waitRepo     chan bool
+	waitManifest chan bool
 }
 
 func NewDB(ctx context.Context, dsn string, migrationsDir string) (rdb.RepoMetadataDB, error) {
@@ -205,29 +206,74 @@ func getRepoId(ctx context.Context, sess *dbr.Session, repoName string) (int64, 
 	return repoId, nil
 }
 
-func (pg *pgDB) updateManifest(ctx context.Context, manifest *rdb.Manifest) error {
+func (pg *pgDB) upsertManifest(ctx context.Context, manifest *rdb.Manifest) error {
 	return pg.withTransaction(ctx, func(tx *dbr.Tx) error {
-		// get count of refers array to see if manifest is already updated
+	start:
+		now := time.Now().UTC()
 		var count int
 		err := tx.SelectBySql(
 			"SELECT COALESCE(array_length(refers, 1), 0) FROM blobs WHERE digest=? FOR UPDATE", manifest.Blob.Digest).
 			LoadOneContext(ctx, &count)
-		if err != nil {
+		if err != nil && err != dbr.ErrNotFound {
 			return errors.Wrap(err, "getManifestRefersLen")
 		}
+		// manifest info already exists. Only update last_referred
 		if count > 0 {
-			// manifest already updated
+			_, err := tx.Update("blobs").
+				Set("last_referred", now).
+				Where(dbr.Eq("digest", manifest.Blob.Digest)).
+				ExecContext(ctx)
+			if err != nil {
+				return errors.Wrap(err, "updateManifestLastReferred")
+			}
 			return nil
 		}
-		// update refers
-		refersDigests := digests(manifest.Refers)
-		_, err = tx.Update("blobs").
-			Set("refers", pq.Array(refersDigests)).
-			Where(dbr.Eq("digest", manifest.Blob.Digest)).
-			ExecContext(ctx)
-		if err != nil {
-			return errors.Wrap(err, "updateManifestRefers")
+
+		// block on wait channel if it exists (for testing)
+		if pg.waitManifest != nil {
+			// first wait is to allow the test to know that we've stopped
+			pg.waitManifest <- true
+			// second wait is for test to resume execution after doing any operaiton (like creating manifest)
+			pg.waitManifest <- true
+			// reset to nil so that if controls move back to "start" label again then we would like to
+			// have normal flow without blocking
+			pg.waitManifest = nil
 		}
+
+		refersDigests := digests(manifest.Refers)
+		if err == dbr.ErrNotFound {
+			// manifest doesn't exist; create new
+			r, err := tx.InsertBySql(
+				`INSERT INTO blobs(digest, refcount, size, last_referred, refers, payload)
+				 VALUES(?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(digest) DO NOTHING`,
+				manifest.Blob.Digest, 0, manifest.Blob.Size, now, pq.Array(refersDigests), manifest.Payload).
+				ExecContext(ctx)
+			if err != nil {
+				return errors.Wrap(err, "manifestinsert")
+			}
+			numRows, err := r.RowsAffected()
+			if err != nil {
+				return errors.Wrap(err, "insertManifest")
+			}
+			if numRows == 0 {
+				// looks like another process inserted between above check and this insertion. restart
+				goto start
+			}
+		} else {
+			// manifest exists; update refers and last_referred
+			_, err := tx.Update("blobs").
+				Set("size", manifest.Blob.Size).
+				Set("last_referred", now).
+				Set("refers", pq.Array(refersDigests)).
+				Set("payload", manifest.Payload).
+				Where(dbr.Eq("digest", manifest.Blob.Digest)).
+				ExecContext(ctx)
+			if err != nil {
+				return errors.Wrap(err, "updateManifestRefers")
+			}
+		}
+
 		// update referred blob's refcount
 		// sort "refers" alphabetically to ensure there is no deadlock when two trans are trying to
 		// insert manifest with common blobs
@@ -239,7 +285,7 @@ func (pg *pgDB) updateManifest(ctx context.Context, manifest *rdb.Manifest) erro
 		})
 		for _, blob := range refers {
 			r, err := tx.UpdateBySql(
-				`UPDATE blobs SET refcount=refcount+1 WHERE digest=?`,
+				`UPDATE blobs SET refcount=refcount+1, last_referred=now() WHERE digest=?`,
 				blob.Digest).ExecContext(ctx)
 			if err != nil {
 				return errors.Wrap(err, "updateBlobRefcount")
@@ -280,7 +326,7 @@ func (pg *pgDB) PutManifestOnRepo(ctx context.Context, manifest *rdb.Manifest, r
 	}
 
 	// update manifest with blobs info if not already done
-	err = pg.updateManifest(ctx, manifest)
+	err = pg.upsertManifest(ctx, manifest)
 	if err != nil {
 		return err
 	}
@@ -312,7 +358,7 @@ func (pg *pgDB) GetRepoManifest(ctx context.Context, repo string, dgst digest.Di
 	    r.full_name = ? 
 	    AND b.digest = ?`
 	var manifest rdb.Manifest
-	err := sess.SelectBySql(query, repo, string(dgst)).LoadOneContext(ctx, &manifest.Blob)
+	err := sess.SelectBySql(query, repo, string(dgst)).LoadOneContext(ctx, &manifest)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting repo manifest")
 	}
