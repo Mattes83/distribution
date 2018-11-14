@@ -2,11 +2,16 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/docker/distribution"
+	dcontext "github.com/docker/distribution/context"
+	"github.com/docker/distribution/manifest/schema2"
 	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/storage/driver"
+	"github.com/docker/distribution/registry/storage/rdb"
+	"github.com/docker/distribution/registry/storage/rdb/mem"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -14,51 +19,47 @@ import (
 
 type rdbRegistry struct {
 	distribution.Namespace
-	rdb RepoMetadataDB
-	//driver driver.StorageDriver
-	bs distribution.BlobStore
+	db     rdb.RepoMetadataDB
+	driver driver.StorageDriver
 }
 
 func NewRDBRegistry(sd driver.StorageDriver) (distribution.Namespace, error) {
-	statter := &blobStatter{
-		driver: driver,
-	}
-	bs := &blobStore{
-		driver:  driver,
-		statter: statter,
-	}
 	return &rdbRegistry{
-		rdb: rdb,
-		bs:  bs,
+		db:     mem.New(),
+		driver: sd,
 	}, nil
 }
 
-func (r *registry) Scope() distribution.Scope {
+func (r *rdbRegistry) Scope() distribution.Scope {
 	return distribution.GlobalScope
 }
 
-func (r *registry) Repository(ctx context.Context, name reference.Named) (distribution.Repository, error) {
-	return &rdbRepo{reg: registry, name: name, rdb: rdb}, nil
+func (r *rdbRegistry) Repository(ctx context.Context, name reference.Named) (distribution.Repository, error) {
+	return &rdbRepo{
+		reg:  r,
+		name: name,
+		db:   r.db,
+	}, nil
 }
 
-func (r *registry) Repositories(ctx context.Context, repos []string, last string) (n int, err error) {
+func (r *rdbRegistry) Repositories(ctx context.Context, repos []string, last string) (n int, err error) {
 	panic("not implemented")
 }
 
-func (r *registry) Blobs() distribution.BlobEnumerator {
+func (r *rdbRegistry) Blobs() distribution.BlobEnumerator {
 	panic("not implemented")
 }
 
-func (r *registry) BlobStatter() distribution.BlobStatter {
+func (r *rdbRegistry) BlobStatter() distribution.BlobStatter {
 	panic("not implemented")
 }
 
 // --- repo
 type rdbRepo struct {
 	distribution.Repository
-	reg  *registry
-	name reference.Name
-	rdb  RepoMetadataDB
+	reg  *rdbRegistry
+	name reference.Named
+	db   rdb.RepoMetadataDB
 }
 
 func (r *rdbRepo) Named() reference.Named {
@@ -68,28 +69,49 @@ func (r *rdbRepo) Named() reference.Named {
 func (r *rdbRepo) Manifests(ctx context.Context, options ...distribution.ManifestServiceOption) (distribution.ManifestService, error) {
 	return &rdbManifestSvc{
 		repo: r,
-		rdb:  rdb,
+		db:   r.db,
 	}, nil
 }
 
 func (r *rdbRepo) Blobs(ctx context.Context) distribution.BlobStore {
-	statter := &blobStatter{
-		driver: driver,
-	}
 	bs := &blobStore{
-		driver:  driver,
-		statter: statter,
+		driver: r.reg.driver,
+		statter: &blobStatter{
+			driver: r.reg.driver,
+		},
+	}
+	var statter distribution.BlobDescriptorService = &linkedBlobStatter{
+		blobStore:   bs,
+		repository:  r,
+		linkPathFns: []linkPathFunc{blobLinkPath},
+	}
+	fileBS := &linkedBlobStore{
+		registry:  r.reg,
+		blobStore: bs,
+		blobServer: &blobServer{
+			driver:  r.reg.driver,
+			statter: statter,
+			pathFn:  bs.path,
+		},
+		blobAccessController: statter,
+		repository:           r,
+		ctx:                  ctx,
+
+		// TODO(stevvooe): linkPath limits this blob store to only layers.
+		// This instance cannot be used for manifest checks.
+		linkPathFns: []linkPathFunc{blobLinkPath},
 	}
 	return &rdbBlobstore{
-		fileBlobstore: bs,
+		fileBlobstore: fileBS,
 		repo:          r,
+		db:            r.db,
 	}
 }
 
 func (r *rdbRepo) Tags(ctx context.Context) distribution.TagService {
 	return &rdbTagsvc{
 		repo: r,
-		rdb:  r.rdb,
+		db:   r.db,
 	}
 }
 
@@ -97,31 +119,74 @@ func (r *rdbRepo) Tags(ctx context.Context) distribution.TagService {
 type rdbManifestSvc struct {
 	distribution.ManifestService
 	repo *rdbRepo
-	rdb  RepoMetadataDB
+	db   rdb.RepoMetadataDB
 }
 
 func (m *rdbManifestSvc) Exists(ctx context.Context, dgst digest.Digest) (bool, error) {
-	return m.rdb.IsManifestLinked(ctx, m.repo.name.Name(), dgst)
+	dcontext.GetLogger(ctx).Debugf("rdbManifest.Exists: %s", dgst)
+	return m.db.IsManifestLinked(ctx, m.repo.name.Name(), dgst)
 }
 
 func (m *rdbManifestSvc) Get(ctx context.Context, dgst digest.Digest, options ...distribution.ManifestServiceOption) (distribution.Manifest, error) {
-	dbm, err := m.rdb.GetRepoManifest(ctx, m.repo.name.Name(), dgst)
+	dcontext.GetLogger(ctx).Debugf("rdbManifest.Get: %s", dgst)
+	dbm, err := m.db.GetRepoManifest(ctx, m.repo.name.Name(), dgst)
 	if err != nil {
 		return nil, err
 	}
-	return dbManifestToDistribManifest(dbm), nil
+	distribm, err := dbManifestToDistribManifest(dbm)
+	if err != nil {
+		return nil, err
+	}
+	return distribm, nil
+}
+
+func dbManifestToDistribManifest(m *rdb.Manifest) (distribution.Manifest, error) {
+	// Hardcoding for schema2
+	dm, _, err := distribution.UnmarshalManifest(schema2.MediaTypeManifest, m.Payload)
+	if err != nil {
+		return nil, err
+	}
+	return dm, nil
 }
 
 func (m *rdbManifestSvc) Put(ctx context.Context, manifest distribution.Manifest, options ...distribution.ManifestServiceOption) (digest.Digest, error) {
+	dcontext.GetLogger(ctx).Debug("rdbManifest.Put")
 	dbm, err := distribManifestToRDBManifest(manifest)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	err = rdb.PutManifestWithRepo(ctx, dbm, m.repo.name.Name())
+	err = m.db.PutManifestWithRepo(ctx, dbm, m.repo.name.Name())
+	if err != nil {
+		return "", err
+	}
+	return dbm.Digest, nil
+}
+
+func distribManifestToRDBManifest(dm distribution.Manifest) (*rdb.Manifest, error) {
+	mt, payload, err := dm.Payload()
 	if err != nil {
 		return nil, err
 	}
-	return dbm.Blob.Digest, nil
+	if mt != schema2.MediaTypeManifest {
+		return nil, fmt.Errorf("only schema2 supported: %s", mt)
+	}
+	_, desc, err := distribution.UnmarshalManifest(schema2.MediaTypeManifest, payload)
+	if err != nil {
+		return nil, err
+	}
+	refers := dm.References()
+	dbm := rdb.Manifest{
+		Blob: rdb.Blob{
+			Digest: desc.Digest,
+			Size:   desc.Size,
+		},
+		Payload: payload,
+		Refers:  make([]*rdb.Blob, len(refers)),
+	}
+	for i := 0; i < len(refers); i++ {
+		dbm.Refers[i] = descriptorToBlob(refers[i])
+	}
+	return &dbm, nil
 }
 
 func (m *rdbManifestSvc) Delete(ctx context.Context, dgst digest.Digest) error {
@@ -133,49 +198,78 @@ type rdbBlobstore struct {
 	distribution.BlobStore
 	fileBlobstore distribution.BlobStore
 	repo          *rdbRepo
-	rdb           RepoMetadataDB
+	db            rdb.RepoMetadataDB
 }
 
 func (r *rdbBlobstore) Stat(ctx context.Context, dgst digest.Digest) (distribution.Descriptor, error) {
 	// TODO: Check if this gets called for manifest digest
-	linked, err := r.rdb.IsBlobLinked(ctx, dgst, r.repo.name.Name())
+	dcontext.GetLogger(ctx).Debugf("rdbBlobstore.Stat: %s", dgst)
+	linked, err := r.db.IsBlobLinked(ctx, r.repo.name.Name(), dgst)
 	if err != nil {
 		return distribution.Descriptor{}, err
 	}
-	if !exists {
-		return distribution.Descriptor{}, distribuion.ErrBlobUnknown
+	if !linked {
+		return distribution.Descriptor{}, distribution.ErrBlobUnknown
 	}
 	return r.fileBlobstore.Stat(ctx, dgst)
 }
 
 func (r *rdbBlobstore) Get(ctx context.Context, dgst digest.Digest) ([]byte, error) {
-	linked, err := r.rdb.IsBlobLinked(ctx, dgst, r.repo.name.Name())
+	dcontext.GetLogger(ctx).Debugf("rdbBlobstore.Get: %s", dgst)
+	linked, err := r.db.IsBlobLinked(ctx, r.repo.name.Name(), dgst)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
-		return nil, distribuion.ErrBlobUnknown
+	if !linked {
+		return nil, distribution.ErrBlobUnknown
 	}
 	return r.fileBlobstore.Get(ctx, dgst)
 }
 
 func (r *rdbBlobstore) Open(ctx context.Context, dgst digest.Digest) (distribution.ReadSeekCloser, error) {
-	linked, err := r.rdb.IsBlobLinked(ctx, dgst, r.repo.name.Name())
+	dcontext.GetLogger(ctx).Debugf("rdbBlobstore.Open: %s", dgst)
+	linked, err := r.db.IsBlobLinked(ctx, r.repo.name.Name(), dgst)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
-		return nil, distribuion.ErrBlobUnknown
+	if !linked {
+		return nil, distribution.ErrBlobUnknown
 	}
 	return r.fileBlobstore.Open(ctx, dgst)
 }
 
 func (r *rdbBlobstore) Put(ctx context.Context, mediaType string, p []byte) (distribution.Descriptor, error) {
+	dcontext.GetLogger(ctx).Debug("rdbBlobstore.Put")
 	desc, err := r.fileBlobstore.Put(ctx, mediaType, p)
 	if err != nil {
 		return desc, err
 	}
-	err = r.rdb.PutBlobWithRepo(ctx, descriptorToBlob(desc), r.repo.name.Name())
+	err = r.db.PutBlobWithRepo(ctx, descriptorToBlob(desc), r.repo.name.Name())
+	if err != nil {
+		return distribution.Descriptor{}, err
+	}
+	return desc, nil
+}
+
+func descriptorToBlob(desc distribution.Descriptor) *rdb.Blob {
+	return &rdb.Blob{
+		Digest: desc.Digest,
+		Size:   desc.Size,
+	}
+}
+
+type rdbBlobwriter struct {
+	distribution.BlobWriter
+	rdbBS *rdbBlobstore
+}
+
+func (w *rdbBlobwriter) Commit(ctx context.Context, provisional distribution.Descriptor) (distribution.Descriptor, error) {
+	dcontext.GetLogger(ctx).Debug("rdbBlobwriter.Commit")
+	desc, err := w.BlobWriter.Commit(ctx, provisional)
+	if err != nil {
+		return desc, err
+	}
+	err = w.rdbBS.db.PutBlobWithRepo(ctx, descriptorToBlob(desc), w.rdbBS.repo.name.Name())
 	if err != nil {
 		return distribution.Descriptor{}, err
 	}
@@ -183,16 +277,27 @@ func (r *rdbBlobstore) Put(ctx context.Context, mediaType string, p []byte) (dis
 }
 
 func (r *rdbBlobstore) Create(ctx context.Context, options ...distribution.BlobCreateOption) (distribution.BlobWriter, error) {
-	return r.fileBlobstore.Create(ctx, options...)
+	dcontext.GetLogger(ctx).Debug("rdbBlobstore.Create")
+	bw, err := r.fileBlobstore.Create(ctx, options...)
+	if err != nil {
+		return nil, err
+	}
+	return &rdbBlobwriter{bw, r}, nil
 }
 
 func (r *rdbBlobstore) Resume(ctx context.Context, id string) (distribution.BlobWriter, error) {
-	return r.fileBlobstore.Resume(ctx, id)
+	dcontext.GetLogger(ctx).Debugf("rdbBlobstore.Resume: %s", id)
+	bw, err := r.fileBlobstore.Resume(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &rdbBlobwriter{bw, r}, nil
 }
 
-func (r *rdbBlobstore) ServeBlob(ctx context.Context, w http.ResponseWriter, r *http.Request, dgst digest.Digest) error {
+func (bs *rdbBlobstore) ServeBlob(ctx context.Context, w http.ResponseWriter, r *http.Request, dgst digest.Digest) error {
 	// TODO: Verify it doesnt get called for manifest
-	return r.fileBlobstore.ServeBlob(ctx, w, r)
+	dcontext.GetLogger(ctx).Debugf("rdbBlobstore.ServeBlob: %s", dgst)
+	return bs.fileBlobstore.ServeBlob(ctx, w, r, dgst)
 }
 
 func (r *rdbBlobstore) Delete(ctx context.Context, dgst digest.Digest) error {
@@ -203,23 +308,31 @@ func (r *rdbBlobstore) Delete(ctx context.Context, dgst digest.Digest) error {
 type rdbTagsvc struct {
 	distribution.TagService
 	repo *rdbRepo
-	rdb  RepoMetadataDB
+	db   rdb.RepoMetadataDB
 }
 
 func (r *rdbTagsvc) Get(ctx context.Context, tag string) (distribution.Descriptor, error) {
-	m, err := r.rdb.GetTagManifest(ctx, r.repo.name.Name(), tag)
+	m, err := r.db.GetTagManifest(ctx, r.repo.name.Name(), tag)
 	if err != nil {
 		return distribution.Descriptor{}, err
 	}
 	return dbManifestToDescriptor(m), nil
 }
 
+func dbManifestToDescriptor(m *rdb.Manifest) distribution.Descriptor {
+	return distribution.Descriptor{
+		MediaType: schema2.MediaTypeManifest,
+		Digest:    m.Digest,
+		Size:      m.Size,
+	}
+}
+
 func (r *rdbTagsvc) Tag(ctx context.Context, tag string, desc distribution.Descriptor) error {
-	return r.rdb.LinkTag(ctx, r.repo.name.Name(), tag, descriptorToManifest(desc))
+	return r.db.LinkTag(ctx, r.repo.name.Name(), tag, desc.Digest)
 }
 
 func (r *rdbTagsvc) Untag(ctx context.Context, tag string) error {
-	return r.rdb.DeleteTag(ctx, r.repo.name.Name(), tag)
+	return r.db.DeleteTag(ctx, r.repo.name.Name(), tag)
 }
 
 func (r *rdbTagsvc) All(ctx context.Context) ([]string, error) {

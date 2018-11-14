@@ -32,7 +32,7 @@ type Blob struct {
 }
 
 func (b *Blob) String() string {
-	return fmt.Sprintf("Blob digest: %s, refcount: %d, size: %d, lastref: %s", b.Digest, b.Refcount, b.Size, b.LastReferred)
+	return fmt.Sprintf("Blob digest: %s, refcount: %d, size: %d", b.Digest, b.Refcount, b.Size)
 }
 
 // Manifest is image manifest that composes of layer blobs or other manifests
@@ -68,7 +68,7 @@ type RepoMetadataDB interface {
 
 	// LinkTag links the given tag with the manifest provided in the given repository. The manifest
 	// must be already linked to the repo. The manifests's refcount is incremented
-	LinkTag(ctx context.Context, repo string, tag string, manifest *Manifest) error
+	LinkTag(ctx context.Context, repo string, tag string, manifest digest.Digest) error
 
 	// GetTagManifest gets manifest pointed to by given tag
 	GetTagManifest(ctx context.Context, repo string, tag string) (*Manifest, error)
@@ -80,9 +80,6 @@ type RepoMetadataDB interface {
 	// Delete the repository by deleting all tags and associated manifests with it. The refcounts of
 	// linked manifests is decremented
 	DeleteRepo(ctx context.Context, repo string) error
-
-	// LinkBlobs links the given blobs to the repo. Both repo and blobs must exist before hand
-	LinkBlobs(ctx context.Context, blobs []digest.Digest, repo string) error
 
 	// IsManifestLinked returns whether a given manifest is linked to the repo
 	IsManifestLinked(ctx context.Context, repo string, dgst digest.Digest) (bool, error)

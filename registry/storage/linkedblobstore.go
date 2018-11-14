@@ -24,7 +24,7 @@ type linkPathFunc func(name string, dgst digest.Digest) (string, error)
 // that grant access to the global blob store.
 type linkedBlobStore struct {
 	*blobStore
-	registry               *registry
+	registry               distribution.Namespace
 	blobServer             distribution.BlobServer
 	blobAccessController   distribution.BlobDescriptorService
 	repository             distribution.Repository

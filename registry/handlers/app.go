@@ -294,7 +294,9 @@ func NewApp(ctx context.Context, config *configuration.Configuration) *App {
 
 	if app.registry == nil {
 		// configure the registry if no cache section is available.
-		app.registry, err = storage.NewRegistry(app.Context, app.driver, options...)
+		//app.registry, err = storage.NewRegistry(app.Context, app.driver, options...)
+		// Manish: setup RDB registry
+		app.registry, err = storage.NewRDBRegistry(app.driver)
 		if err != nil {
 			panic("could not create registry: " + err.Error())
 		}
