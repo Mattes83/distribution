@@ -165,14 +165,6 @@ func testPutNewManifestOnRepo(t *testing.T, pg *pgDB) (*rdb.Manifest, *RepoRow) 
 	repo, blob := testPutNewBlobWithRepo(t, pg)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	//existingBlob := rdb.Blob{
-	//	Digest:       digest.Digest(uuid.Generate().String()),
-	//	Size:         20,
-	//	Refcount:     10,
-	//	LastReferred: now.Add(-1 * time.Hour),
-	//}
-	//require.NoError(t, pg.PutBlob(ctx, &existingBlob))
-	// create sample manifest
 	manifest := rdb.Manifest{
 		Blob: rdb.Blob{
 			Digest: digest.Digest(uuid.Generate().String()),
@@ -221,4 +213,23 @@ func TestGetTagManifest(t *testing.T) {
 	require.EqualValues(t, manifest.Digest, gotManifest.Digest)
 	require.EqualValues(t, manifest.Size, gotManifest.Size)
 	require.EqualValues(t, manifest.Payload, gotManifest.Payload)
+	// create new manifest and try linking that one to existing tag
+	blob := &rdb.Blob{
+		Digest: digest.Digest(uuid.Generate().String()),
+		Size:   20,
+	}
+	require.NoError(t, pg.PutBlob(ctx, blob))
+	newManifest := rdb.Manifest{
+		Blob: rdb.Blob{
+			Digest: digest.Digest(uuid.Generate().String()),
+			Size:   10,
+		},
+		Refers: []*rdb.Blob{
+			blob,
+		},
+		Payload: []byte("another"),
+	}
+	require.NoError(t, pg.PutManifestOnRepo(ctx, &newManifest, repo.FullName))
+	// link it to new manifest
+	require.NoError(t, pg.LinkTag(ctx, repo.FullName, "latest", newManifest.Digest))
 }
