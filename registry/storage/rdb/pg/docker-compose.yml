@@ -1,0 +1,21 @@
+version: "3.4"
+services:
+  sqltest:
+    image: golang:1.11
+    environment:
+      PGURL: postgres://rdb:rdb@db/rdb?sslmode=disable
+    command:
+      "bash -c 'until >/dev/tcp/db/5432; do sleep 1; done; go test -v ./registry/storage/rdb/pg -tags db_integration;'"
+    working_dir: /go/src/github.com/docker/distribution
+    volumes:
+      - ../../../:/go/src/github.com/docker/distribution
+    depends_on: 
+      - db
+  db:
+    image: postgres:10
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: rdb
+      POSTGRES_PASSWORD: rdb
+      POSTGRES_DB: rdb

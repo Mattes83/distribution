@@ -44,7 +44,7 @@ func (m *memDB) PutBlobWithRepo(ctx context.Context, blob *rdb.Blob, repo string
 	return nil
 }
 
-func (m *memDB) PutManifestWithRepo(ctx context.Context, manifest *rdb.Manifest, repo string) error {
+func (m *memDB) PutManifestOnRepo(ctx context.Context, manifest *rdb.Manifest, repo string) error {
 	manifests := m.repoManifests[repo]
 	if manifests == nil {
 		m.repoManifests[repo] = make(map[digest.Digest]*rdb.Manifest)

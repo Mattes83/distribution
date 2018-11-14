@@ -12,6 +12,7 @@ import (
 	"github.com/docker/distribution/registry/storage/driver"
 	"github.com/docker/distribution/registry/storage/rdb"
 	"github.com/docker/distribution/registry/storage/rdb/mem"
+	"github.com/docker/distribution/registry/storage/rdb/pg"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -23,7 +24,10 @@ type rdbRegistry struct {
 	driver driver.StorageDriver
 }
 
-func NewRDBRegistry(sd driver.StorageDriver) (distribution.Namespace, error) {
+func NewRDBRegistry(ctx context.Context, sd driver.StorageDriver) (distribution.Namespace, error) {
+	if err := pg.NewDB(ctx, dsn, migrationsDir); err != nil {
+		return nil, err
+	}
 	return &rdbRegistry{
 		db:     mem.New(),
 		driver: sd,

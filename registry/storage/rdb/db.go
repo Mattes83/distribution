@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 )
@@ -26,9 +27,10 @@ func (e ManifestNotFoundErr) Error() string {
 
 // Blob is registry image layer or config json
 type Blob struct {
-	Digest   digest.Digest
-	Refcount int64
-	Size     int64
+	Digest       digest.Digest
+	Refcount     int64
+	Size         int64
+	LastReferred time.Time
 }
 
 func (b *Blob) String() string {
@@ -58,10 +60,11 @@ type RepoMetadataDB interface {
 	// associated with the blob and links it.
 	PutBlobWithRepo(ctx context.Context, blob *Blob, repo string) error
 
-	// PutManifestWithRepo inserts or updates the given manifest and ties it with given repository.
-	// The repository is inserted if not found already. It increments the refcount of linked blobs.
-	// Will return BlobNotFoundErr if linked blobs are not found in DB
-	PutManifestWithRepo(ctx context.Context, manifest *Manifest, repo string) error
+	// PutManifestOnRepo updates the manifest information (refers field) and increments referred blob's
+	// refcount only if manifest is not updated already. It then links the manifest to the repo.
+	// This is slightly different from PutManifestWith(BlobsAnd)Repo where it expects the manifest
+	// and referred blobs to already exist in the DB
+	PutManifestOnRepo(ctx context.Context, manifest *Manifest, repo string) error
 
 	// GetRepoManifest returns manifest on a repo
 	GetRepoManifest(ctx context.Context, repo string, dgst digest.Digest) (*Manifest, error)
