@@ -166,6 +166,8 @@ storage:
       dryrun: false
     readonly:
       enabled: false
+	rdb: # Use this to store repo metadata in postgres and above driver to store blob content
+		pg_dsn: postgres://uname:pwd@host/dbname
 auth:
   silly:
     realm: silly-realm

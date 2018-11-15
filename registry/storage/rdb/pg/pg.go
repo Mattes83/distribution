@@ -107,11 +107,13 @@ func (pg *pgDB) ensureRepoAdded(tx *dbr.Tx, ctx context.Context, repo string) (r
 		pg.waitRepo <- true
 	}
 	// Repo does not exist; create one
+	var namespace, name string
 	splits := strings.SplitN(repo, "/", 2)
 	if len(splits) != 2 {
-		return 0, fmt.Errorf("repo name '%s' does not have /", repo)
+		namespace, name = "", repo
+	} else {
+		namespace, name = splits[0], splits[1]
 	}
-	namespace, name := splits[0], splits[1]
 	err = tx.SelectBySql(
 		`INSERT INTO repos(full_name, namespace, name)
 		 VALUES(?, ?, ?)

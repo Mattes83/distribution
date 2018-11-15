@@ -7,6 +7,8 @@ log:
 storage:
   filesystem:
     rootdirectory: /Users/manish/stuff/registry/testdata
+  rdb:
+    pg_dsn: postgres://rdb:rdb@localhost/rdb?sslmode=disable
 http:
   addr: :5000
   #  debug:

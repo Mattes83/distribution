@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/docker/distribution"
 	dcontext "github.com/docker/distribution/context"
@@ -11,7 +12,6 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/storage/driver"
 	"github.com/docker/distribution/registry/storage/rdb"
-	"github.com/docker/distribution/registry/storage/rdb/mem"
 	"github.com/docker/distribution/registry/storage/rdb/pg"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -24,12 +24,14 @@ type rdbRegistry struct {
 	driver driver.StorageDriver
 }
 
-func NewRDBRegistry(ctx context.Context, sd driver.StorageDriver) (distribution.Namespace, error) {
-	if err := pg.NewDB(ctx, dsn, migrationsDir); err != nil {
+func NewRDBRegistry(ctx context.Context, sd driver.StorageDriver, dsn string) (distribution.Namespace, error) {
+	migrationsDir := os.Getenv("GOPATH") + "/src/github.com/docker/distribution/registry/storage/rdb/pg/migrations"
+	db, err := pg.NewDB(ctx, dsn, migrationsDir)
+	if err != nil {
 		return nil, err
 	}
 	return &rdbRegistry{
-		db:     mem.New(),
+		db:     db,
 		driver: sd,
 	}, nil
 }
@@ -159,7 +161,7 @@ func (m *rdbManifestSvc) Put(ctx context.Context, manifest distribution.Manifest
 	if err != nil {
 		return "", err
 	}
-	err = m.db.PutManifestWithRepo(ctx, dbm, m.repo.name.Name())
+	err = m.db.PutManifestOnRepo(ctx, dbm, m.repo.name.Name())
 	if err != nil {
 		return "", err
 	}
