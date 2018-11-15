@@ -213,6 +213,7 @@ func TestGetTagManifest(t *testing.T) {
 	require.EqualValues(t, manifest.Digest, gotManifest.Digest)
 	require.EqualValues(t, manifest.Size, gotManifest.Size)
 	require.EqualValues(t, manifest.Payload, gotManifest.Payload)
+	require.EqualValues(t, manifest.Refcount+1, gotManifest.Refcount)
 	// create new manifest and try linking that one to existing tag
 	blob := &rdb.Blob{
 		Digest: digest.Digest(uuid.Generate().String()),

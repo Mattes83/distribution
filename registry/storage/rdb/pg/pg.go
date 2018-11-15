@@ -373,18 +373,27 @@ func (pg *pgDB) LinkTag(ctx context.Context, repo string, tag string, manifest d
 	if err != nil {
 		return err
 	}
-	query := `
-		INSERT INTO tags 
-		VALUES 
-			(?, ?, ?) ON CONFLICT(repo_id, tag) DO 
-		UPDATE 
-		SET 
-			manifest = EXCLUDED.manifest`
-	_, err = sess.InsertBySql(query, repoId, tag, manifest).ExecContext(ctx)
-	if err != nil {
-		return errors.Wrap(err, "error linking tag")
-	}
-	return nil
+	return pg.withTransaction(ctx, func(tx *dbr.Tx) error {
+		// insert tag
+		query := `
+			INSERT INTO tags 
+			VALUES 
+				(?, ?, ?) ON CONFLICT(repo_id, tag) DO 
+			UPDATE 
+			SET 
+				manifest = EXCLUDED.manifest`
+		_, err = tx.InsertBySql(query, repoId, tag, manifest).ExecContext(ctx)
+		if err != nil {
+			return errors.Wrap(err, "error linking tag")
+		}
+		// update refcount of manifest
+		_, err = tx.UpdateBySql("UPDATE blobs SET refcount=refcount+1 WHERE digest=?", manifest).
+			ExecContext(ctx)
+		if err != nil {
+			return errors.Wrap(err, "Error updating manifest refcount")
+		}
+		return nil
+	})
 }
 
 func (pg *pgDB) GetTagManifest(ctx context.Context, repo string, tag string) (*rdb.Manifest, error) {
@@ -393,8 +402,9 @@ func (pg *pgDB) GetTagManifest(ctx context.Context, repo string, tag string) (*r
 	query := `
 		SELECT 
 			b.digest, 
-			b.size, 
-			b.payload 
+			b.size,
+			b.refcount,
+			b.payload
 		FROM 
 			blobs b 
 			JOIN tags t ON t.manifest = b.digest 
