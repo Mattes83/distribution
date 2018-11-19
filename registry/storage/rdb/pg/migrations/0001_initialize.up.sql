@@ -6,7 +6,7 @@ CREATE TABLE blobs(
 	size bigint NOT NULL,
 	last_referred timestamp without time zone NOT NULL,
 	-- digests of blobs that this blob refers to
-	refers text[] DEFAULT '{}'
+	refers text[] DEFAULT '{}',
 	-- used to store manifest payload only
 	payload bytea
 );
