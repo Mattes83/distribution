@@ -1,0 +1,18 @@
+version: 0.1
+log:
+  fields:
+    service: registry
+  level: debug
+  formatter: text
+storage:
+  filesystem:
+    rootdirectory: /Users/manish/dump/registry/fs-data
+http:
+  addr: :5000
+  #  debug:
+  #      addr: :5001
+  #      prometheus:
+  #          enabled: true
+  #          path: /metrics
+  headers:
+    X-Content-Type-Options: [nosniff]
