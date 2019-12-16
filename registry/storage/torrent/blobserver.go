@@ -156,7 +156,10 @@ func createTorrentFile(ctx context.Context, torrents TorrentStore, bs distributi
 
 func init() {
 	var err error
-	client, err = torrent.NewClient(&torrent.Config{DataDir: "/tmp", Seed: true})
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.Seed = true
+	cfg.DataDir = "/tmp"
+	client, err = torrent.NewClient(cfg)
 	if err != nil {
 		logrus.WithError(err).Error("Couldnt create client")
 	}

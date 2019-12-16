@@ -9,7 +9,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 )
 
-func testNew(t *testing.T) {
+func TestNewInMemPeerCache(t *testing.T) {
 	p := NewInMemPeerCache()
 	dgst := digest.NewDigestFromHex("sha256", "6fe15d4cbc64ea9bf5ff4f9c56bb70a4fca285063e0005453915e989b96d937c")
 	peers, _ := p.getPeers(dgst)
