@@ -131,6 +131,7 @@ func createTorrentFile(torrents TorrentStore, tracker string, bs distribution.Bl
 		logger.WithError(err).Error("Couldn't create temp file")
 		return err
 	}
+	defer os.Remove(path)
 	io.Copy(f, r)
 	f.Close()
 	s, _ := os.Stat(path)

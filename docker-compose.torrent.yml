@@ -1,4 +1,4 @@
-version: "3.4"
+version: "3.7"
 services:
   registry:
     build:
@@ -18,6 +18,24 @@ services:
     image: lednerb/opentracker-docker
     ports:
       - "6969"
+  engine1:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    environment:
+      REGISTRY_URL: http://registry:5000
+      DATA_DIR: /root/engine/
+    ports:
+      - "80"
+    depends_on:
+      - registry
+      - tracker
+  client1:
+    image: curlimages/curl
+    command: curl engine1/repos/alpine/tags/latest/pull
+    #entrypoint: sh
+    depends_on:
+      - engine1
   peer:
     build:
       context: .

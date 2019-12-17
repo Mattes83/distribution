@@ -1,0 +1,15 @@
+FROM golang:1.13.4-alpine AS build
+
+ENV DISTRIBUTION_DIR /go/src/github.com/docker/distribution
+RUN set -ex \
+    && apk add --no-cache make git file
+
+WORKDIR $DISTRIBUTION_DIR
+COPY . $DISTRIBUTION_DIR
+RUN CGO_ENABLED=0 GO111MODULE=off go build -o /go/engine $DISTRIBUTION_DIR/engine/
+
+FROM alpine:3.10
+
+COPY --from=build /go/engine /bin/engine
+EXPOSE 80
+ENTRYPOINT ["engine"]
