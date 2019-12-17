@@ -15,7 +15,7 @@ RUN set -ex \
 WORKDIR $DISTRIBUTION_DIR
 #RUN go get -d github.com/anacrolix/torrent
 COPY . $DISTRIBUTION_DIR
-RUN CGO_ENABLED=0 make PREFIX=/go clean binaries && file ./bin/registry | grep "statically linked"
+RUN CGO_ENABLED=0 GO111MODULE=off make PREFIX=/go clean binaries && file ./bin/registry | grep "statically linked"
 
 FROM alpine:3.10
 

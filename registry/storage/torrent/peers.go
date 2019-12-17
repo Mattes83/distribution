@@ -5,35 +5,34 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/opencontainers/go-digest"
 )
 
 type PeerCache interface {
-	getPeers(dgst digest.Digest) ([]torrent.Peer, error)
-	addPeer(dgst digest.Digest, peer torrent.Peer, ttl time.Duration) error
+	GetPeers(infoHash torrent.InfoHash) (torrent.Peers, error)
+	AddPeer(infoHash torrent.InfoHash, peer torrent.Peer, ttl time.Duration) error
 }
 
 type memPeers struct {
-	cache map[digest.Digest]torrent.Peers
+	cache map[torrent.InfoHash]torrent.Peers
 	mutex sync.Mutex
 }
 
 func NewInMemPeerCache() PeerCache {
-	return &memPeers{cache: make(map[digest.Digest]torrent.Peers), mutex: sync.Mutex{}}
+	return &memPeers{cache: make(map[torrent.InfoHash]torrent.Peers), mutex: sync.Mutex{}}
 }
 
-func (p *memPeers) getPeers(dgst digest.Digest) ([]torrent.Peer, error) {
-	peers, ok := p.cache[dgst]
+func (p *memPeers) GetPeers(infoHash torrent.InfoHash) (torrent.Peers, error) {
+	peers, ok := p.cache[infoHash]
 	if !ok {
 		peers = make(torrent.Peers, 10)
-		p.cache[dgst] = peers
+		p.cache[infoHash] = peers
 	}
 	return peers, nil
 }
 
-func (p *memPeers) addPeer(dgst digest.Digest, peer torrent.Peer, ttl time.Duration) error {
+func (p *memPeers) AddPeer(infoHash torrent.InfoHash, peer torrent.Peer, ttl time.Duration) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	p.cache[dgst] = append(p.cache[dgst], peer)
+	p.cache[infoHash] = append(p.cache[infoHash], peer)
 	return nil
 }

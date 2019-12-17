@@ -1,0 +1,20 @@
+version: 0.1
+log:
+  fields:
+    service: registry
+  level: debug
+  formatter: text
+storage:
+  cache:
+    blobdescriptor: inmemory
+  filesystem:
+    rootdirectory: /var/lib/registry/
+http:
+  addr: :5000
+  torrent:
+    tracker: http://tracker:6969/announce
+  debug:
+    addr: :5001
+    prometheus:
+      enabled: true
+      path: /metrics

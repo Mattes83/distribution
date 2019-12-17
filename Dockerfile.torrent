@@ -1,0 +1,12 @@
+FROM golang:1.13-alpine
+RUN apk add --no-cache git build-base curl
+RUN go get github.com/anacrolix/torrent/cmd/torrent
+RUN go get github.com/anacrolix/torrent/cmd/torrent-metainfo-pprint
+RUN echo "#!/bin/sh" > download.sh
+RUN echo 'curl registry:5000/v2/alpine/blobs/sha256:be8881be8156e4068e611fe956aba2b9593ebd953be14fb7feea6d0659aa3abe -H "Accept: application/x-bittorrent" > /dev/null' >> download.sh
+RUN echo "sleep 2" >> download.sh
+RUN echo 'curl registry:5000/v2/alpine/blobs/sha256:be8881be8156e4068e611fe956aba2b9593ebd953be14fb7feea6d0659aa3abe -H "Accept: application/x-bittorrent" > /root/blob.torrent' >> download.sh
+RUN echo "torrent-metainfo-pprint < /root/blob.torrent" >> download.sh
+RUN echo "torrent /root/blob.torrent" >> download.sh
+RUN chmod u+x download.sh
+ENTRYPOINT ["torrent"]

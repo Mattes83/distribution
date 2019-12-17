@@ -103,6 +103,23 @@ func NewURLBuilderFromRequest(r *http.Request, relative bool) *URLBuilder {
 	return NewURLBuilder(u, relative)
 }
 
+func (ub *URLBuilder) BuildURLAppendingPath(path string) (string, error) {
+	r := ub.root
+	rootCopy := url.URL{
+		Scheme:     r.Scheme,
+		Opaque:     "",
+		User:       nil,
+		Host:       r.Host,
+		Path:       r.Path + path,
+		RawPath:    "",
+		ForceQuery: false,
+		RawQuery:   "",
+		Fragment:   "",
+	}
+	rootCopy.Path += path
+	return rootCopy.String(), nil
+}
+
 // BuildBaseURL constructs a base url for the API, typically just "/v2/".
 func (ub *URLBuilder) BuildBaseURL() (string, error) {
 	route := ub.cloneRoute(RouteNameBase)

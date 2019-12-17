@@ -24,7 +24,7 @@ import (
 	"github.com/docker/distribution/notifications"
 	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/api/errcode"
-	"github.com/docker/distribution/registry/api/v2"
+	v2 "github.com/docker/distribution/registry/api/v2"
 	"github.com/docker/distribution/registry/auth"
 	registrymiddleware "github.com/docker/distribution/registry/middleware/registry"
 	repositorymiddleware "github.com/docker/distribution/registry/middleware/repository"
@@ -110,6 +110,8 @@ func NewApp(ctx context.Context, config *configuration.Configuration) *App {
 	app.register(v2.RouteNameBlob, blobDispatcher)
 	app.register(v2.RouteNameBlobUpload, blobUploadDispatcher)
 	app.register(v2.RouteNameBlobUploadChunk, blobUploadDispatcher)
+
+	app.router.Handle("/bittorrent/announce", http.HandlerFunc(torrent.TrackerAnnounceHandler))
 
 	// override the storage driver's UA string for registry outbound HTTP requests
 	storageParams := config.Storage.Parameters()
@@ -713,7 +715,7 @@ func (app *App) dispatcher(dispatch dispatchFunc) http.Handler {
 				app.eventBridge(context, r))
 
 			context.Repository, err = applyRepoMiddleware(app, context.Repository, app.Config.Middleware["repository"])
-			context.Repository = torrent.NewTorrentRepository(context.Repository, app.httpHost)
+			context.Repository = torrent.NewTorrentRepository(context.Repository, app.Config.HTTP.Torrent.Tracker)
 			if err != nil {
 				dcontext.GetLogger(context).Errorf("error initializing repository middleware: %v", err)
 				context.Errors = append(context.Errors, errcode.ErrorCodeUnknown.WithDetail(err))

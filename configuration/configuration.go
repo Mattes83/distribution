@@ -154,6 +154,11 @@ type Configuration struct {
 			// to connect via http2. If set to true, only http/1.1 is supported.
 			Disabled bool `yaml:"disabled,omitempty"`
 		} `yaml:"http2,omitempty"`
+
+		Torrent struct {
+			// Tracker URL for bittorrent serving
+			Tracker string `yaml:"tracker,omitempty"`
+		} `yaml:"torrent,omitempty"`
 	} `yaml:"http,omitempty"`
 
 	// Notifications specifies configuration about various endpoint to which

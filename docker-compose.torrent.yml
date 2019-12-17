@@ -1,0 +1,29 @@
+version: "3.4"
+services:
+  registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: "serve /registry/serverconf/config.yml"
+    volumes:
+      - /Users/manish/stuff/registry/data:/var/lib/registry
+      - ./torrent-conf.yml:/registry/serverconf/config.yml
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+      - "42069/udp"
+    depends_on:
+      - tracker
+  tracker:
+    image: lednerb/opentracker-docker
+    ports:
+      - "6969"
+  peer:
+    build:
+      context: .
+      dockerfile: Dockerfile.torrent
+    command: /go/download.sh
+    entrypoint: sh
+    depends_on:
+      - registry
+      - tracker
