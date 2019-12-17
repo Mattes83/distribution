@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,15 +11,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/docker/distribution/manifest/schema2"
+
 	"github.com/gorilla/mux"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/anacrolix/torrent/metainfo"
-
-	"github.com/docker/distribution"
-
-	"github.com/docker/distribution/registry/client"
 
 	"github.com/anacrolix/torrent"
 	"github.com/opencontainers/go-digest"
@@ -74,8 +73,7 @@ type Engine interface {
 }
 
 type engine struct {
-	tc *torrent.Client
-	//regClient client.Registry
+	tc      *torrent.Client
 	regURL  string
 	dataDir string
 	logger  *logrus.Entry
@@ -86,6 +84,7 @@ func NewEngine(regURL, dataDir string) Engine {
 	cfg.NoDHT = true
 	cfg.DataDir = dataDir
 	cfg.Seed = true
+	cfg.Debug = true
 	tc, err := torrent.NewClient(cfg)
 	if err != nil {
 		panic(err)
@@ -98,45 +97,23 @@ func NewEngine(regURL, dataDir string) Engine {
 	}
 }
 
-type repoName string
-
-func (r repoName) Name() string {
-	return string(r)
-}
-
-func (r repoName) String() string {
-	return string(r)
-}
-
-func (e *engine) getDistribRepo(ctx context.Context, repo string) (distribution.Repository, error) {
-	//repoName, err := reference.ParseNamed(repo)
-	//if err != nil {
-	//	return nil, err
-	//}
-	repoObj, err := client.NewRepository(repoName(repo), e.regURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	return repoObj, nil
-}
-
 func (e *engine) Pull(ctx context.Context, repo, tag string) error {
 	// get manifest referred by tag
-	repoObj, err := e.getDistribRepo(ctx, repo)
+	tagURL := fmt.Sprintf("%s/v2/%s/manifests/%s", e.regURL, repo, tag)
+	req, err := http.NewRequest("GET", tagURL, nil)
 	if err != nil {
-		return fmt.Errorf("get repo error: %w", err)
+		return fmt.Errorf("http new: %w", err)
 	}
-	desc, err := repoObj.Tags(ctx).Get(ctx, tag)
+	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("tag.get error: %w", err)
+		return fmt.Errorf("http do: %w", err)
 	}
-	ms, err := repoObj.Manifests(ctx)
+	defer resp.Body.Close()
+	var m schema2.Manifest
+	err = json.NewDecoder(resp.Body).Decode(&m)
 	if err != nil {
-		return fmt.Errorf("manifestservice error: %w", err)
-	}
-	m, err := ms.Get(ctx, desc.Digest)
-	if err != nil {
-		return fmt.Errorf("manifest.get %s error: %w", desc.Digest, err)
+		return fmt.Errorf("json decode: %w", err)
 	}
 
 	// start downloading layers in the manifest
